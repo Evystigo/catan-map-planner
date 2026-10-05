@@ -173,7 +173,7 @@ function buildGeometry(mode) {
         const mx = h.x + S * Math.sqrt(3) / 2 * Math.cos(a), my = h.y + S * Math.sqrt(3) / 2 * Math.sin(a);
         const c1 = [h.x + S * Math.cos(a - Math.PI / 6), h.y + S * Math.sin(a - Math.PI / 6)];
         const c2 = [h.x + S * Math.cos(a + Math.PI / 6), h.y + S * Math.sin(a + Math.PI / 6)];
-        edges.push({ mx, my, a, c1, c2, ang: Math.atan2(my - cy, mx - cx) });
+        edges.push({ mx, my, a, c1, c2, hi: i, ang: Math.atan2(my - cy, mx - cx) });
       }
     }
   });
@@ -183,11 +183,21 @@ function buildGeometry(mode) {
   return { cx, cy };
 }
 
+// spread ports evenly along the coast, never putting two on the same tile
 function pickPortSlots(edges, n) {
   portSlots = [];
-  if (!edges.length) return;
-  n = Math.min(n, edges.length);
-  for (let i = 0; i < n; i++) portSlots.push(edges[Math.floor(i * edges.length / n)]);
+  const E = edges.length;
+  const usedHex = new Set(), usedEdge = new Set();
+  for (let i = 0; i < n && E; i++) {
+    const t = Math.floor(i * E / n);
+    for (let off = 0; off < E; off++) {
+      const k = (t + (off % 2 ? (off + 1) / 2 : -off / 2) + 2 * E) % E;
+      if (usedEdge.has(k) || usedHex.has(edges[k].hi)) continue;
+      usedEdge.add(k); usedHex.add(edges[k].hi); portSlots.push(edges[k]);
+      break;
+    }
+  }
+  portSlots.sort((p, q) => p.ang - q.ang);
   portSlots.forEach(p => { p.ox = p.mx + 0.62 * S * Math.cos(p.a); p.oy = p.my + 0.62 * S * Math.sin(p.a); });
 }
 
@@ -202,7 +212,7 @@ function computeFreePorts() {
       const a = d * Math.PI / 3;
       const mx = h.x + S * Math.sqrt(3) / 2 * Math.cos(a), my = h.y + S * Math.sqrt(3) / 2 * Math.sin(a);
       edges.push({
-        mx, my, a,
+        mx, my, a, hi: i,
         c1: [h.x + S * Math.cos(a - Math.PI / 6), h.y + S * Math.sin(a - Math.PI / 6)],
         c2: [h.x + S * Math.cos(a + Math.PI / 6), h.y + S * Math.sin(a + Math.PI / 6)],
         ang: Math.atan2(my - center.cy, mx - center.cx),
@@ -338,6 +348,37 @@ const hexPts = (x, y, r) => [0,1,2,3,4,5].map(i => {
   const a = Math.PI / 3 * i - Math.PI / 6; return (x + r * Math.cos(a)).toFixed(1) + ',' + (y + r * Math.sin(a)).toFixed(1);
 }).join(' ');
 
+// ---------- tile art ----------
+// each icon is drawn around (0,0); SLOTS are positions that stay clear of the number token in the centre
+const SLOTS = { t: [0, -29], ul: [-27, -13], ur: [27, -13], ll: [-24, 17], lr: [24, 17], b: [0, 32] };
+const ICONS = {
+  forest: () => `<rect x="-1.5" y="3" width="3" height="5" fill="#5d4037"/><polygon points="0,-11 -7,0 7,0" fill="#1b5e20"/><polygon points="0,-6 -8,5 8,5" fill="#256d2a"/>`,
+  pasture: () => `<g stroke="#4a4a4a" stroke-width="1.2"><line x1="-3" y1="3" x2="-3" y2="7"/><line x1="3" y1="3" x2="3" y2="7"/></g><ellipse cx="0" cy="0" rx="7" ry="5" fill="#fafafa" stroke="#bbb" stroke-width=".8"/><circle cx="7" cy="-1.5" r="3" fill="#333"/>`,
+  field: () => `<line x1="0" y1="8" x2="0" y2="-9" stroke="#8d6e0f" stroke-width="1.3"/>${[-6, -1, 4].map(y => `<ellipse cx="-3" cy="${y}" rx="1.6" ry="3.2" transform="rotate(-30 -3 ${y})" fill="#b8860b"/><ellipse cx="3" cy="${y}" rx="1.6" ry="3.2" transform="rotate(30 3 ${y})" fill="#b8860b"/>`).join('')}`,
+  hill: () => `<g fill="#9a3f1f" stroke="#5b2210" stroke-width=".9"><rect x="-8" y="-6" width="9" height="5"/><rect x="1" y="-6" width="9" height="5"/><rect x="-4" y="-1" width="9" height="5"/><rect x="-8" y="4" width="9" height="5"/><rect x="1" y="4" width="9" height="5"/></g>`,
+  mountain: () => `<polygon points="0,-11 -12,8 12,8" fill="#58636b"/><polygon points="0,-11 -4.5,-3.5 -1,-5.5 1.5,-3 4.5,-3.5" fill="#fff"/><polygon points="6,-3 -1,8 13,8" fill="#6b7780" opacity=".9"/>`,
+  gold: () => `<circle cx="-4" cy="3" r="5" fill="#ffd54f" stroke="#8a6d00" stroke-width="1"/><circle cx="5" cy="4" r="4.5" fill="#ffca28" stroke="#8a6d00" stroke-width="1"/><circle cx="0" cy="-3" r="4.5" fill="#ffe082" stroke="#8a6d00" stroke-width="1"/><text x="0" y="-1" text-anchor="middle" font-size="6" font-weight="700" fill="#8a6d00">$</text>`,
+  dune: () => `<path d="M-10,4 Q-5,-6 0,2 T10,2" fill="none" stroke="#bfa062" stroke-width="2" stroke-linecap="round"/>`,
+  cactus: () => `<g fill="#4e8a3e"><rect x="-2" y="-9" width="4" height="17" rx="2"/><rect x="-7" y="-4" width="3" height="7" rx="1.5"/><rect x="-7" y="1" width="6" height="3" rx="1.5"/><rect x="4" y="-6" width="3" height="7" rx="1.5"/><rect x="1" y="-1" width="6" height="3" rx="1.5"/></g>`,
+  wave: () => `<path d="M-9,0 q2.25,-4 4.5,0 t4.5,0 t4.5,0 t4.5,0" fill="none" stroke="#fff" stroke-opacity=".45" stroke-width="1.6" stroke-linecap="round"/>`,
+};
+const ART = {
+  forest:   [['t','forest'],['ul','forest'],['ur','forest'],['ll','forest'],['lr','forest']],
+  pasture:  [['ul','pasture'],['ur','pasture'],['ll','pasture'],['lr','pasture']],
+  field:    [['t','field'],['ul','field'],['ur','field'],['ll','field'],['lr','field']],
+  hill:     [['ul','hill'],['ur','hill'],['ll','hill'],['lr','hill']],
+  mountain: [['ul','mountain'],['ur','mountain'],['b','mountain']],
+  gold:     [['t','gold'],['ll','gold'],['lr','gold']],
+  desert:   [['ul','dune'],['lr','dune'],['ur','cactus'],['ll','dune'],['b','dune']],
+  sea:      [['ul','wave'],['ur','wave'],['t','wave'],['ll','wave'],['lr','wave'],['b','wave']],
+};
+function tileArt(res, x, y) {
+  return (ART[res] || []).map(([slot, icon]) => {
+    const [dx, dy] = SLOTS[slot];
+    return `<g transform="translate(${(x + dx).toFixed(1)} ${(y + dy).toFixed(1)})" style="pointer-events:none">${ICONS[icon]()}</g>`;
+  }).join('');
+}
+
 function render() {
   const svg = $('board'), pad = 90;
   const maxX = Math.max(...hexes.map(h => h.x)), maxY = Math.max(...hexes.map(h => h.y));
@@ -362,8 +403,7 @@ function render() {
     }
     out += `<g data-i="${i}">
       <polygon class="hex ${selected === i ? 'sel' : ''}" points="${hexPts(h.x, h.y, S)}" fill="${RES[t.res].color}"${t.res === 'sea' ? ' stroke="#2a5f7b" stroke-width="1.5"' : ''}/>`;
-    if (t.res === 'desert') out += `<text x="${h.x}" y="${h.y + 6}" text-anchor="middle" font-size="22" style="pointer-events:none">🏜️</text>`;
-    if (t.res === 'gold') out += `<text x="${h.x}" y="${h.y - 24}" text-anchor="middle" font-size="13" style="pointer-events:none">🪙</text>`;
+    out += tileArt(t.res, h.x, h.y);
     if (t.num) {
       const pips = 6 - Math.abs(7 - t.num);
       out += `<circle cx="${h.x}" cy="${h.y}" r="17" fill="#f7ecd0" stroke="#3b2a14" stroke-width="1.5" style="pointer-events:none"/>
