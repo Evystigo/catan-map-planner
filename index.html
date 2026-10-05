@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Catan Map Planner</title>
+<style>
+  :root {
+    --bg: #1e2a33; --panel: #2a3944; --text: #eef2f4; --muted: #9fb0bb; --accent: #f2b134;
+    --sea: #2f6f8f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, Segoe UI, sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 12px 20px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; border-bottom: 1px solid #3a4b58; }
+  h1 { font-size: 20px; margin: 0 12px 0 0; }
+  main { display: flex; gap: 16px; padding: 16px; flex-wrap: wrap; align-items: flex-start; }
+  #boardWrap { flex: 1 1 560px; background: var(--sea); border-radius: 12px; padding: 8px; min-width: 300px; }
+  svg { width: 100%; height: auto; display: block; }
+  aside { flex: 0 0 300px; display: flex; flex-direction: column; gap: 12px; }
+  .card { background: var(--panel); border-radius: 10px; padding: 12px; }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
+  input[type=number] { width: 56px; font: inherit; color: var(--text); background: #3b4f5d; border: 1px solid #4d6575; border-radius: 6px; padding: 4px; }
+  label { font-size: 13px; }
+  button, select { font: inherit; color: var(--text); background: #3b4f5d; border: 1px solid #4d6575; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+  button:hover { background: #48606f; }
+  button.primary { background: var(--accent); color: #222; border-color: var(--accent); font-weight: 600; }
+  button.primary:hover { filter: brightness(1.08); }
+  button:disabled { opacity: .4; cursor: default; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .res-btn { display: flex; align-items: center; gap: 6px; }
+  .swatch { width: 14px; height: 14px; border-radius: 3px; display: inline-block; border: 1px solid #0006; }
+  .num-btn { width: 36px; padding: 6px 0; text-align: center; }
+  .num-btn.red { color: #ff7b72; font-weight: 700; }
+  label.chk { display: flex; gap: 6px; align-items: center; font-size: 14px; }
+  .warn { color: #ff9b8f; font-size: 13px; margin: 4px 0 0; }
+  .ok { color: #8fd694; font-size: 13px; margin: 4px 0 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td { padding: 2px 4px; }
+  td:last-child { text-align: right; color: var(--muted); }
+  .hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+  .hex { cursor: pointer; stroke: #3b2a14; stroke-width: 2; transition: filter .1s; }
+  .hex:hover { filter: brightness(1.12); }
+  .sel { stroke: #fff; stroke-width: 5; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Catan Map Planner</h1>
+  <select id="mode" title="Board size">
+    <option value="std">3–4 players (19 tiles)</option>
+    <option value="ext">5–6 players (30 tiles)</option>
+    <option value="sea">Seafarers – frame (37 cells)</option>
+    <option value="sea2">Seafarers – large frame (61 cells)</option>
+  </select>
+  <button class="primary" id="rand">🎲 Randomize all</button>
+  <button id="randRes">Shuffle resources</button>
+  <button id="randNum">Shuffle numbers</button>
+  <button id="randPort">Shuffle ports</button>
+  <button id="clear">Clear</button>
+  <button id="png">Download PNG</button>
+</header>
+<main>
+  <div id="boardWrap"><svg id="board" xmlns="http://www.w3.org/2000/svg"></svg></div>
+  <aside>
+    <div class="card">
+      <h2>Selected tile</h2>
+      <div class="row" id="resBtns"></div>
+      <div class="row" id="numBtns" style="margin-top:8px"></div>
+      <p class="hint">Click a tile on the board, then pick a terrain and number. Click a port to cycle its type. Arrow keys / Esc also work: Esc deselects.</p>
+    </div>
+    <div class="card">
+      <h2>Randomizer rules</h2>
+      <label class="chk"><input type="checkbox" id="noRed" checked> No adjacent 6 / 8</label>
+      <label class="chk"><input type="checkbox" id="noSame" checked> No adjacent identical numbers</label>
+      <label class="chk"><input type="checkbox" id="deserts" > Keep desert in the middle</label>
+    </div>
+    <div class="card" id="freeCard" style="display:none">
+      <h2>Seafarers generator</h2>
+      <div class="row" style="align-items:center">
+        <label>Land tiles <input type="number" id="landN" min="3" max="55" value="22"></label>
+        <label>Islands <input type="number" id="islandN" min="1" max="8" value="3"></label>
+        <label>Ports <input type="number" id="portN" min="0" max="16" value="9"></label>
+      </div>
+      <div class="row" style="margin-top:8px"><button id="genIslands">Generate islands + fill</button></div>
+      <p class="hint">Or paint by hand: pick a tile, then choose Sea, Off-board (removes the cell), Gold, or any land. "Randomize all" regenerates islands too; "Shuffle resources" keeps the current land shape. Gold fields are picked at ~1 per 10 land tiles. Ports sit on land edges that face the sea.</p>
+    </div>
+    <div class="card">
+      <h2>Balance</h2>
+      <table id="stats"></table>
+      <div id="warnings"></div>
+    </div>
+  </aside>
+</main>
+
+<script>
+const S = 50, W = Math.sqrt(3) * S;
+const RES = {
+  forest:   { name: 'Forest (wood)',   color: '#2e7d32' },
+  pasture:  { name: 'Pasture (wool)',  color: '#9ccc65' },
+  field:    { name: 'Field (grain)',   color: '#f4d03f' },
+  hill:     { name: 'Hill (brick)',    color: '#c0562f' },
+  mountain: { name: 'Mountain (ore)',  color: '#8a949c' },
+  desert:   { name: 'Desert',          color: '#e6d3a3' },
+  gold:     { name: 'Gold (any)',      color: '#d9a21b' },
+  sea:      { name: 'Sea',             color: '#3d8bb0' },
+  void:     { name: 'Off-board',       color: 'none' },
+  empty:    { name: 'Empty',           color: '#5b7482' },
+};
+const NO_NUM = ['desert', 'sea', 'void'];
+const isLand = r => !['sea', 'void'].includes(r);
+const PORTS = ['3:1', 'wood', 'wool', 'grain', 'brick', 'ore'];
+const PORT_COLOR = { '3:1': '#ffffff', wood: RES.forest.color, wool: RES.pasture.color, grain: RES.field.color, brick: RES.hill.color, ore: RES.mountain.color };
+
+const MODES = {
+  std: {
+    rows: [3,4,5,4,3],
+    res: { forest:4, pasture:4, field:4, hill:3, mountain:3, desert:1 },
+    nums: [2,3,3,4,4,5,5,6,6,8,8,9,9,10,10,11,11,12],
+    ports: ['3:1','3:1','3:1','3:1','wood','wool','grain','brick','ore'],
+  },
+  ext: {
+    rows: [3,4,5,6,5,4,3],
+    res: { forest:6, pasture:6, field:6, hill:5, mountain:5, desert:2 },
+    nums: [2,2,3,3,3,4,4,4,5,5,5,6,6,6,8,8,8,9,9,9,10,10,10,11,11,11,12,12],
+    ports: ['3:1','3:1','3:1','3:1','3:1','wood','wool','grain','brick','ore','3:1'],
+  },
+  sea: {
+    free: true, rows: [4,5,6,7,6,5,4], defLand: 22, defIslands: 3, defPorts: 9,
+    nums: [2,3,3,4,4,5,5,6,6,8,8,9,9,10,10,11,11,12],
+    ports: ['3:1','3:1','3:1','3:1','wood','wool','grain','brick','ore'],
+  },
+  sea2: {
+    free: true, rows: [5,6,7,8,9,8,7,6,5], defLand: 36, defIslands: 4, defPorts: 11,
+    nums: [2,3,3,4,4,5,5,6,6,8,8,9,9,10,10,11,11,12],
+    ports: ['3:1','3:1','3:1','3:1','3:1','wood','wool','grain','brick','ore','3:1'],
+  },
+};
+const isFree = () => !!MODES[state.mode].free;
+
+let state = null, hexes = [], portSlots = [], selected = null, center = { cx: 0, cy: 0 };
+
+const $ = id => document.getElementById(id);
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+function buildGeometry(mode) {
+  const rows = MODES[mode].rows, maxC = Math.max(...rows);
+  hexes = [];
+  rows.forEach((c, r) => {
+    for (let k = 0; k < c; k++) {
+      hexes.push({ x: (maxC - c) * W / 2 + k * W, y: r * 1.5 * S, nb: [] });
+    }
+  });
+  hexes.forEach((a, i) => hexes.forEach((b, j) => {
+    if (i !== j && Math.abs(Math.hypot(a.x - b.x, a.y - b.y) - W) < 1) a.nb.push(j);
+  }));
+  const cx = (maxC - 1) * W / 2, cy = (rows.length - 1) * 0.75 * S;
+  center = { cx, cy };
+  hexes.forEach(h => {
+    h.dir = [0,1,2,3,4,5].map(d => {
+      const a = d * Math.PI / 3, nx = h.x + W * Math.cos(a), ny = h.y + W * Math.sin(a);
+      return hexes.findIndex(o => Math.hypot(o.x - nx, o.y - ny) < 1);
+    });
+  });
+  portSlots = [];
+  if (MODES[mode].free) return { cx, cy };
+  // perimeter edges, ordered clockwise
+  const edges = [];
+  hexes.forEach((h, i) => {
+    for (let d = 0; d < 6; d++) {
+      const a = d * Math.PI / 3;
+      const nx = h.x + W * Math.cos(a), ny = h.y + W * Math.sin(a);
+      if (!hexes.some(o => Math.hypot(o.x - nx, o.y - ny) < 1)) {
+        const mx = h.x + S * Math.sqrt(3) / 2 * Math.cos(a), my = h.y + S * Math.sqrt(3) / 2 * Math.sin(a);
+        const c1 = [h.x + S * Math.cos(a - Math.PI / 6), h.y + S * Math.sin(a - Math.PI / 6)];
+        const c2 = [h.x + S * Math.cos(a + Math.PI / 6), h.y + S * Math.sin(a + Math.PI / 6)];
+        edges.push({ mx, my, a, c1, c2, ang: Math.atan2(my - cy, mx - cx) });
+      }
+    }
+  });
+  edges.sort((p, q) => p.ang - q.ang);
+  const n = MODES[mode].ports.length;
+  pickPortSlots(edges, n);
+  return { cx, cy };
+}
+
+function pickPortSlots(edges, n) {
+  portSlots = [];
+  if (!edges.length) return;
+  n = Math.min(n, edges.length);
+  for (let i = 0; i < n; i++) portSlots.push(edges[Math.floor(i * edges.length / n)]);
+  portSlots.forEach(p => { p.ox = p.mx + 0.62 * S * Math.cos(p.a); p.oy = p.my + 0.62 * S * Math.sin(p.a); });
+}
+
+// Seafarers: ports go on land edges that face open sea, recomputed from the current map
+function computeFreePorts() {
+  const edges = [];
+  hexes.forEach((h, i) => {
+    if (!isLand(state.tiles[i].res)) return;
+    for (let d = 0; d < 6; d++) {
+      const j = h.dir[d];
+      if (j >= 0 && state.tiles[j].res !== 'sea') continue;
+      const a = d * Math.PI / 3;
+      const mx = h.x + S * Math.sqrt(3) / 2 * Math.cos(a), my = h.y + S * Math.sqrt(3) / 2 * Math.sin(a);
+      edges.push({
+        mx, my, a,
+        c1: [h.x + S * Math.cos(a - Math.PI / 6), h.y + S * Math.sin(a - Math.PI / 6)],
+        c2: [h.x + S * Math.cos(a + Math.PI / 6), h.y + S * Math.sin(a + Math.PI / 6)],
+        ang: Math.atan2(my - center.cy, mx - center.cx),
+      });
+    }
+  });
+  edges.sort((p, q) => p.ang - q.ang);
+  pickPortSlots(edges, state.portCount);
+}
+
+function setPortCount(n) {
+  state.portCount = n;
+  const base = MODES[state.mode].ports;
+  while (state.ports.length < n) state.ports.push(base[state.ports.length % base.length]);
+}
+
+function freshState(mode) {
+  const g = buildGeometry(mode);
+  const m = MODES[mode];
+  state = { mode, tiles: hexes.map(() => ({ res: m.free ? 'sea' : 'empty', num: null })), ports: m.ports.slice() };
+  if (m.free) { state.landN = m.defLand; state.islandN = m.defIslands; setPortCount(m.defPorts); }
+  return g;
+}
+
+// ---------- randomization ----------
+function randomizeFreeResources() {
+  const land = state.tiles.map((t, i) => isLand(t.res) ? i : -1).filter(i => i >= 0);
+  const n = land.length;
+  if (!n) return;
+  const desert = n >= 12 ? Math.round(n / 18) : 0, gold = n >= 12 ? Math.round(n / 10) : 0;
+  const base = ['forest', 'pasture', 'field', 'hill', 'mountain'];
+  const pool = [];
+  for (let i = 0; i < desert; i++) pool.push('desert');
+  for (let i = 0; i < gold; i++) pool.push('gold');
+  const rest = n - pool.length, order = shuffle(base.slice());
+  for (let i = 0; i < rest; i++) pool.push(order[i % 5]);
+  shuffle(pool);
+  land.forEach((idx, k) => { state.tiles[idx].res = pool[k]; if (NO_NUM.includes(pool[k])) state.tiles[idx].num = null; });
+}
+
+// grow `islandN` separate islands totalling about `landN` land cells; the rest becomes sea
+function generateIslands() {
+  const total = Math.min(state.landN, hexes.length - 6), k = Math.max(1, Math.min(state.islandN, total));
+  const interior = i => hexes[i].dir.every(d => d >= 0);
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const relax = attempt > 100;
+    const owner = new Array(hexes.length).fill(-1);
+    const cand = hexes.map((_, i) => i).filter(i => relax || interior(i));
+    shuffle(cand);
+    const seeds = [];
+    for (const c of cand) {
+      if (seeds.length === k) break;
+      if (seeds.every(s => Math.hypot(hexes[s].x - hexes[c].x, hexes[s].y - hexes[c].y) > W * (relax ? 2 : 3))) seeds.push(c);
+    }
+    if (seeds.length < k) continue;
+    seeds.forEach((s, id) => owner[s] = id);
+    let count = k, stuck = 0, turn = 0;
+    while (count < total && stuck < 50) {
+      const id = turn++ % k, opts = [];
+      owner.forEach((o, i) => {
+        if (o !== id) return;
+        hexes[i].dir.forEach(j => {
+          if (j < 0 || owner[j] !== -1 || (!relax && !interior(j))) return;
+          // keep a one-cell sea gap between different islands
+          if (hexes[j].dir.some(n2 => n2 >= 0 && owner[n2] !== -1 && owner[n2] !== id)) return;
+          opts.push(j);
+        });
+      });
+      if (!opts.length) { stuck++; continue; }
+      owner[opts[Math.random() * opts.length | 0]] = id; count++; stuck = 0;
+    }
+    if (count >= Math.min(total, 3) && (count === total || attempt > 150)) {
+      state.tiles.forEach((t, i) => { t.res = owner[i] >= 0 ? 'empty' : 'sea'; t.num = null; });
+      return;
+    }
+  }
+  // fallback: a single blob around the centre
+  const order = hexes.map((h, i) => i).sort((a, b) =>
+    Math.hypot(hexes[a].x - center.cx, hexes[a].y - center.cy) - Math.hypot(hexes[b].x - center.cx, hexes[b].y - center.cy));
+  state.tiles.forEach(t => { t.res = 'sea'; t.num = null; });
+  order.slice(0, total).forEach(i => state.tiles[i].res = 'empty');
+}
+
+function randomizeResources() {
+  if (isFree()) return randomizeFreeResources();
+  const m = MODES[state.mode];
+  const pool = [];
+  Object.entries(m.res).forEach(([r, c]) => { for (let i = 0; i < c; i++) pool.push(r); });
+  shuffle(pool);
+  if ($('deserts').checked) {
+    // move one desert to the most central hex
+    const cx = Math.max(...hexes.map(h => h.x)) / 2, cy = Math.max(...hexes.map(h => h.y)) / 2;
+    let best = 0, bd = 1e9;
+    hexes.forEach((h, i) => { const d = Math.hypot(h.x - cx, h.y - cy); if (d < bd) { bd = d; best = i; } });
+    const di = pool.indexOf('desert'); [pool[di], pool[best]] = [pool[best], pool[di]];
+  }
+  pool.forEach((r, i) => state.tiles[i].res = r);
+}
+
+function numbersValid(nums) {
+  const noRed = $('noRed').checked, noSame = $('noSame').checked;
+  for (let i = 0; i < hexes.length; i++) {
+    const a = nums[i]; if (!a) continue;
+    for (const j of hexes[i].nb) {
+      const b = nums[j]; if (!b) continue;
+      if (noRed && (a === 6 || a === 8) && (b === 6 || b === 8)) return false;
+      if (noSame && a === b) return false;
+    }
+  }
+  return true;
+}
+
+function randomizeNumbers() {
+  const slots = state.tiles.map((t, i) => (!NO_NUM.includes(t.res) ? i : -1)).filter(i => i >= 0);
+  const base = MODES[state.mode].nums;
+  let pool = base.slice();
+  while (pool.length < slots.length) pool = pool.concat(base);
+  let nums, ok = false;
+  for (let attempt = 0; attempt < 5000 && !ok; attempt++) {
+    shuffle(pool);
+    nums = new Array(hexes.length).fill(null);
+    slots.forEach((s, k) => nums[s] = pool[k % pool.length]);
+    ok = numbersValid(nums);
+  }
+  state.tiles.forEach((t, i) => t.num = nums[i]);
+  return ok;
+}
+
+function randomizePorts() { shuffle(state.ports); }
+
+// ---------- rendering ----------
+const hexPts = (x, y, r) => [0,1,2,3,4,5].map(i => {
+  const a = Math.PI / 3 * i - Math.PI / 6; return (x + r * Math.cos(a)).toFixed(1) + ',' + (y + r * Math.sin(a)).toFixed(1);
+}).join(' ');
+
+function render() {
+  const svg = $('board'), pad = 90;
+  const maxX = Math.max(...hexes.map(h => h.x)), maxY = Math.max(...hexes.map(h => h.y));
+  svg.setAttribute('viewBox', `${-W / 2 - pad} ${-S - pad} ${maxX + W + 2 * pad} ${maxY + 2 * S + 2 * pad}`);
+  if (isFree()) computeFreePorts();
+  let out = '', portsOut = '';
+  portSlots.forEach((p, i) => {
+    const t = state.ports[i], col = PORT_COLOR[t];
+    portsOut += `<g class="port" data-p="${i}" style="cursor:pointer">
+      <line x1="${p.c1[0]}" y1="${p.c1[1]}" x2="${p.ox}" y2="${p.oy}" stroke="#d9c9a0" stroke-width="3"/>
+      <line x1="${p.c2[0]}" y1="${p.c2[1]}" x2="${p.ox}" y2="${p.oy}" stroke="#d9c9a0" stroke-width="3"/>
+      <circle cx="${p.ox}" cy="${p.oy}" r="19" fill="${col}" stroke="#3b2a14" stroke-width="2"/>
+      <text x="${p.ox}" y="${p.oy + 4}" text-anchor="middle" font-size="${t === '3:1' ? 13 : 10}" font-weight="700" fill="#222" style="pointer-events:none">${t === '3:1' ? '3:1' : '2:1'}</text>
+      ${t === '3:1' ? '' : `<text x="${p.ox}" y="${p.oy + 31}" text-anchor="middle" font-size="10" fill="#fff" style="pointer-events:none">${t}</text>`}
+    </g>`;
+  });
+  hexes.forEach((h, i) => {
+    const t = state.tiles[i], red = t.num === 6 || t.num === 8;
+    if (t.res === 'void') {
+      out += `<g data-i="${i}" data-void="1"><polygon class="hex ${selected === i ? 'sel' : ''}" points="${hexPts(h.x, h.y, S)}" fill="#ffffff08" stroke="#ffffff40" stroke-dasharray="4 5" stroke-width="1.5"/></g>`;
+      return;
+    }
+    out += `<g data-i="${i}">
+      <polygon class="hex ${selected === i ? 'sel' : ''}" points="${hexPts(h.x, h.y, S)}" fill="${RES[t.res].color}"${t.res === 'sea' ? ' stroke="#2a5f7b" stroke-width="1.5"' : ''}/>`;
+    if (t.res === 'desert') out += `<text x="${h.x}" y="${h.y + 6}" text-anchor="middle" font-size="22" style="pointer-events:none">🏜️</text>`;
+    if (t.res === 'gold') out += `<text x="${h.x}" y="${h.y - 24}" text-anchor="middle" font-size="13" style="pointer-events:none">🪙</text>`;
+    if (t.num) {
+      const pips = 6 - Math.abs(7 - t.num);
+      out += `<circle cx="${h.x}" cy="${h.y}" r="17" fill="#f7ecd0" stroke="#3b2a14" stroke-width="1.5" style="pointer-events:none"/>
+        <text x="${h.x}" y="${h.y + 3}" text-anchor="middle" font-size="${red ? 19 : 17}" font-weight="700" fill="${red ? '#c62828' : '#222'}" style="pointer-events:none">${t.num}</text>
+        <text x="${h.x}" y="${h.y + 13}" text-anchor="middle" font-size="7" letter-spacing="1" fill="${red ? '#c62828' : '#222'}" style="pointer-events:none">${'•'.repeat(pips)}</text>`;
+    }
+    out += '</g>';
+  });
+  svg.innerHTML = out + portsOut;
+  updatePanel();
+  save();
+}
+
+function updatePanel() {
+  // stats
+  const pips = {}, counts = {};
+  state.tiles.forEach(t => {
+    if (t.res === 'empty' || !isLand(t.res)) return;
+    counts[t.res] = (counts[t.res] || 0) + 1;
+    if (t.num) pips[t.res] = (pips[t.res] || 0) + 6 - Math.abs(7 - t.num);
+  });
+  $('stats').innerHTML = '<tr><td></td><td>tiles</td><td>pips</td></tr>' + Object.keys(RES).filter(r => counts[r]).map(r =>
+    `<tr><td><span class="swatch" style="background:${RES[r].color}"></span> ${RES[r].name}</td><td>${counts[r]}</td><td>${r === 'desert' ? '—' : (pips[r] || 0)}</td></tr>`).join('');
+  // warnings
+  const w = [];
+  state.tiles.forEach((t, i) => hexes[i].nb.forEach(j => {
+    if (j < i) return;
+    const a = t.num, b = state.tiles[j].num;
+    if ((a === 6 || a === 8) && (b === 6 || b === 8)) w.push('Adjacent 6/8 at tiles ' + (i + 1) + ' & ' + (j + 1));
+    else if (a && a === b) w.push('Adjacent ' + a + 's at tiles ' + (i + 1) + ' & ' + (j + 1));
+  }));
+  const unset = state.tiles.filter(t => t.res === 'empty').length;
+  $('warnings').innerHTML = (unset ? `<p class="warn">${unset} tile(s) have no terrain yet.</p>` : '') +
+    w.map(x => `<p class="warn">⚠ ${x}</p>`).join('') +
+    (!w.length && !unset ? '<p class="ok">✓ No adjacency problems</p>' : '');
+  // selection buttons
+  document.querySelectorAll('#resBtns button, #numBtns button').forEach(b => b.disabled = selected === null);
+  $('freeCard').style.display = isFree() ? '' : 'none';
+  $('deserts').closest('label').style.display = isFree() ? 'none' : '';
+  if (isFree()) { $('landN').value = state.landN; $('islandN').value = state.islandN; $('portN').value = state.portCount; }
+}
+
+function buildPalette() {
+  $('resBtns').innerHTML = Object.entries(RES).map(([k, v]) =>
+    `<button class="res-btn" data-r="${k}"><span class="swatch" style="background:${v.color}"></span>${v.name.split(' ')[0]}</button>`).join('');
+  $('numBtns').innerHTML = [2,3,4,5,6,8,9,10,11,12].map(n => `<button class="num-btn ${n === 6 || n === 8 ? 'red' : ''}" data-n="${n}">${n}</button>`).join('') +
+    '<button class="num-btn" data-n="0" title="Remove number">✕</button>';
+}
+
+// ---------- events ----------
+$('board').addEventListener('click', e => {
+  const p = e.target.closest('.port');
+  if (p) { const i = +p.dataset.p; state.ports[i] = PORTS[(PORTS.indexOf(state.ports[i]) + 1) % PORTS.length]; render(); return; }
+  const g = e.target.closest('g[data-i]');
+  selected = g ? (selected === +g.dataset.i ? null : +g.dataset.i) : null;
+  render();
+});
+$('resBtns').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b || selected === null) return;
+  const t = state.tiles[selected]; t.res = b.dataset.r; if (NO_NUM.includes(t.res) || t.res === 'empty') t.num = null; render();
+});
+$('numBtns').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b || selected === null) return;
+  const t = state.tiles[selected]; if (NO_NUM.includes(t.res)) return;
+  t.num = +b.dataset.n || null; render();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { selected = null; render(); } });
+
+$('rand').onclick = () => { if (isFree()) generateIslands(); randomizeResources(); randomizeNumbers(); randomizePorts(); selected = null; render(); };
+$('genIslands').onclick = $('rand').onclick;
+$('landN').onchange = e => { state.landN = Math.max(3, Math.min(hexes.length - 6, +e.target.value || 3)); render(); };
+$('islandN').onchange = e => { state.islandN = Math.max(1, Math.min(8, +e.target.value || 1)); render(); };
+$('portN').onchange = e => { setPortCount(Math.max(0, Math.min(16, +e.target.value || 0))); render(); };
+$('randRes').onclick = () => { randomizeResources(); state.tiles.forEach(t => { if (NO_NUM.includes(t.res)) t.num = null; }); render(); };
+$('randNum').onclick = () => { if (state.tiles.some(t => t.res === 'empty')) { alert('Assign terrain first (or use Randomize all).'); return; } randomizeNumbers(); render(); };
+$('randPort').onclick = () => { randomizePorts(); render(); };
+$('clear').onclick = () => { if (confirm('Clear the whole board?')) { freshState(state.mode); selected = null; render(); } };
+$('mode').onchange = e => {
+  freshState(e.target.value); selected = null;
+  if (isFree()) $('rand').onclick(); else render();
+};
+
+$('png').onclick = () => {
+  const svg = $('board').cloneNode(true);
+  svg.querySelectorAll('.sel').forEach(n => n.classList.remove('sel'));
+  svg.querySelectorAll('[data-void]').forEach(n => n.remove());
+  const vb = svg.getAttribute('viewBox').split(' ').map(Number), scale = 2;
+  svg.setAttribute('width', vb[2] * scale); svg.setAttribute('height', vb[3] * scale);
+  svg.insertAdjacentHTML('afterbegin', `<style>.hex{stroke:#3b2a14;stroke-width:2}</style><rect x="${vb[0]}" y="${vb[1]}" width="${vb[2]}" height="${vb[3]}" fill="#2f6f8f"/>`);
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement('canvas'); c.width = vb[2] * scale; c.height = vb[3] * scale;
+    c.getContext('2d').drawImage(img, 0, 0);
+    const a = document.createElement('a'); a.download = 'catan-map.png'; a.href = c.toDataURL('image/png'); a.click();
+  };
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(new XMLSerializer().serializeToString(svg));
+};
+
+// ---------- persistence ----------
+function save() { try { localStorage.setItem('catanMap', JSON.stringify(state)); } catch (e) {} }
+function load() {
+  try {
+    const s = JSON.parse(localStorage.getItem('catanMap'));
+    if (s && MODES[s.mode] && s.tiles.length === MODES[s.mode].rows.reduce((a, b) => a + b)) {
+      buildGeometry(s.mode); state = s; $('mode').value = s.mode; return true;
+    }
+  } catch (e) {}
+  return false;
+}
+
+buildPalette();
+if (!load()) { freshState('std'); randomizeResources(); randomizeNumbers(); }
+render();
+</script>
+</body>
+</html>
